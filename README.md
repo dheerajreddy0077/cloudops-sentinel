@@ -1,3 +1,6 @@
+## 🚀 Live Demo
+
+👉 [View CloudOps Sentinel Live Demo](https://frontend-kappa-blond-50.vercel.app/)
 # CloudOps Sentinel
 
 CloudOps Sentinel is an AWS infrastructure monitoring and automated incident-response platform.
