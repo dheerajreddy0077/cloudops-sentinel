@@ -1,0 +1,1073 @@
+import { useEffect, useState } from "react";
+import "./App.css";
+
+const API_URL = "http://127.0.0.1:8000";
+const EC2_INSTANCE_ID = "i-00016f068272f80f4";
+
+function StatusBadge({ value }) {
+  const normalized = String(value || "UNKNOWN")
+    .toLowerCase()
+    .replaceAll(" ", "-");
+
+  return (
+    <span className={`badge badge-${normalized}`}>
+      {value || "UNKNOWN"}
+    </span>
+  );
+}
+
+function MetricCard({ label, value, description, accent }) {
+  return (
+    <div className={`metric-card ${accent || ""}`}>
+      <div className="metric-label">{label}</div>
+      <div className="metric-value">{value ?? "-"}</div>
+      <div className="metric-description">{description}</div>
+    </div>
+  );
+}
+
+function App() {
+  const [summary, setSummary] = useState(null);
+  const [incidents, setIncidents] = useState([]);
+  const [selectedIncident, setSelectedIncident] = useState(null);
+  const [instanceHealth, setInstanceHealth] = useState(null);
+  const [cpuData, setCpuData] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [healthLoading, setHealthLoading] = useState(true);
+  const [cpuLoading, setCpuLoading] = useState(true);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+
+  const [error, setError] = useState("");
+
+  async function loadDashboard() {
+    try {
+      setLoading(true);
+
+      const [summaryResponse, incidentsResponse] =
+        await Promise.all([
+          fetch(`${API_URL}/api/dashboard/summary`),
+          fetch(`${API_URL}/api/incidents`),
+        ]);
+
+      if (!summaryResponse.ok) {
+        throw new Error("Failed to load dashboard summary");
+      }
+
+      if (!incidentsResponse.ok) {
+        throw new Error("Failed to load incidents");
+      }
+
+      const summaryData = await summaryResponse.json();
+      const incidentsData = await incidentsResponse.json();
+
+      setSummary(summaryData);
+      setIncidents(incidentsData.incidents || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadInstanceHealth() {
+    try {
+      setHealthLoading(true);
+
+      const response = await fetch(
+        `${API_URL}/api/ec2/${EC2_INSTANCE_ID}/status`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load EC2 health");
+      }
+
+      const data = await response.json();
+
+      setInstanceHealth(data);
+    } catch (err) {
+      setInstanceHealth({
+        instance_id: EC2_INSTANCE_ID,
+        state: "unknown",
+        system_status: "unknown",
+        instance_status: "unknown",
+      });
+    } finally {
+      setHealthLoading(false);
+    }
+  }
+
+  async function loadCpuData() {
+    try {
+      setCpuLoading(true);
+
+      const response = await fetch(
+        `${API_URL}/api/cloudwatch/ec2/${EC2_INSTANCE_ID}/cpu`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load CPU data");
+      }
+
+      const data = await response.json();
+
+      setCpuData(data.datapoints || []);
+    } catch (err) {
+      setCpuData([]);
+    } finally {
+      setCpuLoading(false);
+    }
+  }
+
+  async function loadIncidentDetails(incidentId) {
+    try {
+      setDetailsLoading(true);
+      setError("");
+
+      const response = await fetch(
+        `${API_URL}/api/incidents/${incidentId}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load incident details");
+      }
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setSelectedIncident(data.incident);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
+  async function refreshAll() {
+    await Promise.all([
+      loadDashboard(),
+      loadInstanceHealth(),
+      loadCpuData(),
+    ]);
+  }
+
+  useEffect(() => {
+    refreshAll();
+
+    const refreshTimer = setInterval(() => {
+      refreshAll();
+    }, 30000);
+
+    return () => {
+      clearInterval(refreshTimer);
+    };
+  }, []);
+
+  const healthy =
+    instanceHealth?.state === "running" &&
+    instanceHealth?.system_status === "ok" &&
+    instanceHealth?.instance_status === "ok";
+
+  const sortedCpuData = [...cpuData].sort(
+    (a, b) =>
+      new Date(a.Timestamp) - new Date(b.Timestamp)
+  );
+
+  const currentCpu =
+    sortedCpuData.length > 0
+      ? Number(
+          sortedCpuData[sortedCpuData.length - 1].Average
+        )
+      : null;
+
+  const averageCpu =
+    sortedCpuData.length > 0
+      ? sortedCpuData.reduce(
+          (total, point) =>
+            total + Number(point.Average || 0),
+          0
+        ) / sortedCpuData.length
+      : null;
+
+  const maximumCpu =
+    sortedCpuData.length > 0
+      ? Math.max(
+          ...sortedCpuData.map((point) =>
+            Number(point.Average || 0)
+          )
+        )
+      : null;
+
+  const cpuBarWidth =
+    currentCpu !== null
+      ? Math.min(currentCpu, 100)
+      : 0;
+
+  return (
+    <div className="app-shell">
+
+      {/* HEADER */}
+
+      <header className="topbar">
+
+        <div className="brand">
+
+          <div className="brand-icon">
+            CS
+          </div>
+
+          <div>
+
+            <h1>
+              CloudOps Sentinel
+            </h1>
+
+            <p>
+              Cloud infrastructure monitoring & incident response
+            </p>
+
+          </div>
+
+        </div>
+
+        <button
+          className="refresh-button"
+          onClick={refreshAll}
+        >
+          ↻ Refresh
+        </button>
+
+      </header>
+
+      {/* MAIN */}
+
+      <main className="dashboard-container">
+
+        {error && (
+          <div className="alert error-alert">
+            <strong>Dashboard error</strong>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* HERO */}
+
+        <section className="hero-section">
+
+          <div>
+
+            <p className="eyebrow">
+              OPERATIONS CENTER
+            </p>
+
+            <h2>
+              Infrastructure Overview
+            </h2>
+
+            <p className="hero-description">
+              Monitor incidents, EC2 health, CPU utilization
+              and automated remediation from one place.
+            </p>
+
+          </div>
+
+          <div
+            className={`system-status ${
+              healthy ? "healthy" : "warning"
+            }`}
+          >
+
+            <span className="status-dot"></span>
+
+            <div>
+
+              <strong>
+                {healthLoading
+                  ? "Checking system..."
+                  : healthy
+                  ? "System Healthy"
+                  : "Attention Required"}
+              </strong>
+
+              <small>
+                {healthLoading
+                  ? "Checking EC2 status"
+                  : healthy
+                  ? "EC2 instance and AWS health checks passed"
+                  : "One or more health checks require attention"}
+              </small>
+
+            </div>
+
+          </div>
+
+        </section>
+
+        {/* METRICS */}
+
+        {summary && (
+
+          <section className="metrics-grid">
+
+            <MetricCard
+              label="Total Incidents"
+              value={summary.total_incidents}
+              description="All recorded incidents"
+            />
+
+            <MetricCard
+              label="Open Incidents"
+              value={summary.open_incidents}
+              description="Require attention"
+              accent={
+                summary.open_incidents > 0
+                  ? "accent-warning"
+                  : ""
+              }
+            />
+
+            <MetricCard
+              label="Resolved"
+              value={summary.resolved_incidents}
+              description="Successfully resolved"
+              accent="accent-success"
+            />
+
+            <MetricCard
+              label="High Severity"
+              value={summary.high_severity_incidents}
+              description="High priority incidents"
+              accent={
+                summary.high_severity_incidents > 0
+                  ? "accent-danger"
+                  : ""
+              }
+            />
+
+            <MetricCard
+              label="Remediated"
+              value={summary.remediated_incidents}
+              description="Verified healthy"
+              accent="accent-success"
+            />
+
+          </section>
+
+        )}
+
+        {/* CPU MONITORING */}
+
+        <section className="cpu-panel">
+
+          <div className="section-heading">
+
+            <div>
+
+              <p className="eyebrow">
+                AMAZON CLOUDWATCH
+              </p>
+
+              <h2>
+                CPU Utilization
+              </h2>
+
+            </div>
+
+            <StatusBadge
+              value={
+                cpuLoading
+                  ? "CHECKING"
+                  : currentCpu !== null
+                  ? "LIVE"
+                  : "NO DATA"
+              }
+            />
+
+          </div>
+
+          <div className="cpu-overview">
+
+            <div className="cpu-main">
+
+              <span className="cpu-label">
+                Current CPU
+              </span>
+
+              <div className="cpu-value">
+
+                {currentCpu !== null
+                  ? `${currentCpu.toFixed(2)}%`
+                  : "--"}
+
+              </div>
+
+              <span className="cpu-instance">
+                {EC2_INSTANCE_ID}
+              </span>
+
+            </div>
+
+            <div className="cpu-stat">
+
+              <span>
+                Average
+              </span>
+
+              <strong>
+                {averageCpu !== null
+                  ? `${averageCpu.toFixed(2)}%`
+                  : "--"}
+              </strong>
+
+            </div>
+
+            <div className="cpu-stat">
+
+              <span>
+                Maximum
+              </span>
+
+              <strong>
+                {maximumCpu !== null
+                  ? `${maximumCpu.toFixed(2)}%`
+                  : "--"}
+              </strong>
+
+            </div>
+
+          </div>
+
+          <div className="cpu-meter">
+
+            <div className="cpu-meter-header">
+
+              <span>
+                CPU Load
+              </span>
+
+              <span>
+                {currentCpu !== null
+                  ? `${currentCpu.toFixed(2)}%`
+                  : "--"}
+              </span>
+
+            </div>
+
+            <div className="cpu-track">
+
+              <div
+                className="cpu-fill"
+                style={{
+                  width: `${cpuBarWidth}%`,
+                }}
+              ></div>
+
+            </div>
+
+            <div className="cpu-scale">
+
+              <span>0%</span>
+              <span>25%</span>
+              <span>50%</span>
+              <span>75%</span>
+              <span>100%</span>
+
+            </div>
+
+          </div>
+
+          <div className="cpu-history">
+
+            <h3>
+              Recent CPU Readings
+            </h3>
+
+            {sortedCpuData.length === 0 ? (
+
+              <div className="empty-state">
+                No CPU datapoints available.
+              </div>
+
+            ) : (
+
+              <div className="cpu-readings">
+
+                {sortedCpuData.map(
+                  (point, index) => {
+
+                    const value =
+                      Number(point.Average || 0);
+
+                    return (
+                      <div
+                        className="cpu-reading"
+                        key={`${point.Timestamp}-${index}`}
+                      >
+
+                        <div className="reading-time">
+
+                          {new Date(
+                            point.Timestamp
+                          ).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+
+                        </div>
+
+                        <div className="reading-bar">
+
+                          <div
+                            className="reading-fill"
+                            style={{
+                              width: `${Math.min(
+                                value,
+                                100
+                              )}%`,
+                            }}
+                          ></div>
+
+                        </div>
+
+                        <strong>
+                          {value.toFixed(2)}%
+                        </strong>
+
+                      </div>
+                    );
+                  }
+                )}
+
+              </div>
+
+            )}
+
+          </div>
+
+        </section>
+
+        {/* EC2 HEALTH */}
+
+        <section className="health-panel">
+
+          <div className="section-heading">
+
+            <div>
+
+              <p className="eyebrow">
+                AWS EC2
+              </p>
+
+              <h2>
+                Instance Health
+              </h2>
+
+            </div>
+
+            <StatusBadge
+              value={
+                healthLoading
+                  ? "CHECKING"
+                  : healthy
+                  ? "HEALTHY"
+                  : "ATTENTION"
+              }
+            />
+
+          </div>
+
+          <div className="health-grid">
+
+            <div className="health-main">
+
+              <div className="instance-icon">
+                EC2
+              </div>
+
+              <div>
+
+                <span className="health-label">
+                  Instance ID
+                </span>
+
+                <code>
+                  {EC2_INSTANCE_ID}
+                </code>
+
+              </div>
+
+            </div>
+
+            <div className="health-item">
+
+              <span>
+                Instance State
+              </span>
+
+              <strong>
+                {healthLoading
+                  ? "Checking..."
+                  : instanceHealth?.state || "-"}
+              </strong>
+
+            </div>
+
+            <div className="health-item">
+
+              <span>
+                System Status
+              </span>
+
+              <strong>
+                {healthLoading
+                  ? "Checking..."
+                  : instanceHealth?.system_status || "-"}
+              </strong>
+
+            </div>
+
+            <div className="health-item">
+
+              <span>
+                Instance Status
+              </span>
+
+              <strong>
+                {healthLoading
+                  ? "Checking..."
+                  : instanceHealth?.instance_status || "-"}
+              </strong>
+
+            </div>
+
+            <div className="health-item">
+
+              <span>
+                Region
+              </span>
+
+              <strong>
+                ap-south-1
+              </strong>
+
+            </div>
+
+          </div>
+
+        </section>
+
+        {/* INCIDENTS */}
+
+        <section className="incidents-panel">
+
+          <div className="section-heading">
+
+            <div>
+
+              <p className="eyebrow">
+                INCIDENT MANAGEMENT
+              </p>
+
+              <h2>
+                Recent Incidents
+              </h2>
+
+            </div>
+
+            <span className="incident-count">
+              {incidents.length} incidents
+            </span>
+
+          </div>
+
+          {loading ? (
+
+            <div className="empty-state">
+              Loading incidents...
+            </div>
+
+          ) : incidents.length === 0 ? (
+
+            <div className="empty-state">
+              No incidents found.
+            </div>
+
+          ) : (
+
+            <div className="table-container">
+
+              <table className="incident-table">
+
+                <thead>
+
+                  <tr>
+                    <th>Incident</th>
+                    <th>Resource</th>
+                    <th>Type</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Region</th>
+                    <th>Action</th>
+                  </tr>
+
+                </thead>
+
+                <tbody>
+
+                  {incidents.map(
+                    (incident) => (
+
+                      <tr
+                        key={incident.incident_id}
+                      >
+
+                        <td>
+
+                          <button
+                            className="incident-id"
+                            onClick={() =>
+                              loadIncidentDetails(
+                                incident.incident_id
+                              )
+                            }
+                          >
+                            {incident.incident_id?.slice(
+                              0,
+                              8
+                            )}
+                            ...
+                          </button>
+
+                        </td>
+
+                        <td>
+
+                          <code>
+                            {incident.resource || "-"}
+                          </code>
+
+                        </td>
+
+                        <td>
+                          {incident.type || "-"}
+                        </td>
+
+                        <td>
+
+                          <StatusBadge
+                            value={incident.severity}
+                          />
+
+                        </td>
+
+                        <td>
+
+                          <StatusBadge
+                            value={incident.status}
+                          />
+
+                        </td>
+
+                        <td>
+                          {incident.region || "-"}
+                        </td>
+
+                        <td>
+
+                          <button
+                            className="view-button"
+                            onClick={() =>
+                              loadIncidentDetails(
+                                incident.incident_id
+                              )
+                            }
+                          >
+                            View
+                          </button>
+
+                        </td>
+
+                      </tr>
+
+                    )
+                  )}
+
+                </tbody>
+
+              </table>
+
+            </div>
+
+          )}
+
+        </section>
+
+      </main>
+
+      {/* INCIDENT MODAL */}
+
+      {selectedIncident && (
+
+        <div
+          className="modal-overlay"
+          onClick={() =>
+            setSelectedIncident(null)
+          }
+        >
+
+          <div
+            className="incident-modal"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+
+            <div className="modal-header">
+
+              <div>
+
+                <p className="eyebrow">
+                  INCIDENT DETAILS
+                </p>
+
+                <h2>
+                  Incident Information
+                </h2>
+
+                <code>
+                  {selectedIncident.incident_id}
+                </code>
+
+              </div>
+
+              <button
+                className="close-button"
+                onClick={() =>
+                  setSelectedIncident(null)
+                }
+              >
+                ×
+              </button>
+
+            </div>
+
+            {detailsLoading ? (
+
+              <div className="empty-state">
+                Loading incident details...
+              </div>
+
+            ) : (
+
+              <div className="details-grid">
+
+                <div className="detail-item">
+
+                  <span>
+                    Resource
+                  </span>
+
+                  <strong>
+                    {selectedIncident.resource || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Type
+                  </span>
+
+                  <strong>
+                    {selectedIncident.type || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Severity
+                  </span>
+
+                  <StatusBadge
+                    value={selectedIncident.severity}
+                  />
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Status
+                  </span>
+
+                  <StatusBadge
+                    value={selectedIncident.status}
+                  />
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Region
+                  </span>
+
+                  <strong>
+                    {selectedIncident.region || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Remediation
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_status || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Verification
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_verification || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Instance State
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_instance_state || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    System Status
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_system_status || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Instance Status
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_instance_status || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item full-width">
+
+                  <span>
+                    Description
+                  </span>
+
+                  <strong>
+                    {selectedIncident.description || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item full-width">
+
+                  <span>
+                    Resolution Reason
+                  </span>
+
+                  <strong>
+                    {selectedIncident.resolution_reason || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Created At
+                  </span>
+
+                  <strong>
+                    {selectedIncident.created_at || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Updated At
+                  </span>
+
+                  <strong>
+                    {selectedIncident.updated_at || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Remediation Updated
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_updated_at || "-"}
+                  </strong>
+
+                </div>
+
+                <div className="detail-item full-width">
+
+                  <span>
+                    Remediation Message
+                  </span>
+
+                  <strong>
+                    {selectedIncident.remediation_message || "-"}
+                  </strong>
+
+                </div>
+
+              </div>
+
+            )}
+
+          </div>
+
+        </div>
+
+      )}
+
+    </div>
+  );
+}
+
+export default App;
