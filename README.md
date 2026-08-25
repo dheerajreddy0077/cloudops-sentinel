@@ -19,7 +19,7 @@ It monitors EC2 health and CloudWatch CPU utilization, creates incidents in Dyna
 ## Architecture
 CloudOps Sentinel uses AWS CloudWatch for monitoring, FastAPI for backend processing, DynamoDB for incident storage, and a React dashboard for visualization and incident management.
 
-![CloudOps Sentinel Architecture](docs/architecture.png)
+![CloudOps Sentinel Architecture](docs/screenshots/architecture.png)
 
 ## Features
 
