@@ -1,8 +1,25 @@
 # CloudOps Sentinel
 
-CloudOps Sentinel is an AWS cloud infrastructure monitoring and incident response dashboard built with React, FastAPI, Amazon CloudWatch, Amazon EC2, and Amazon DynamoDB.
+CloudOps Sentinel is an AWS infrastructure monitoring and automated incident-response platform.
 
-The application monitors EC2 infrastructure, collects CloudWatch CPU utilization metrics, creates incidents from CloudWatch alarms, stores incident information in DynamoDB, and provides automated EC2 remediation with health verification.
+It monitors EC2 health and CloudWatch CPU utilization, creates incidents in DynamoDB, and provides automated remediation through a web dashboard.
+
+## Dashboard
+
+![CloudOps Sentinel Dashboard](docs/screenshots/dashboard.png)
+
+## Incident Management
+
+![Incident Management](docs/screenshots/incidents.png)
+
+## Incident Details
+
+![Incident Details](docs/screenshots/incident-details.png)
+
+## Architecture
+CloudOps Sentinel uses AWS CloudWatch for monitoring, FastAPI for backend processing, DynamoDB for incident storage, and a React dashboard for visualization and incident management.
+
+![CloudOps Sentinel Architecture](docs/architecture.png)
 
 ## Features
 
